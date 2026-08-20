@@ -1,0 +1,121 @@
+sess = beh.groupby('masked_session_id').agg(
+    notice_id=('notice_id', 'first'),
+    device=('device_category', 'first'),
+    medium=('medium', 'first'),
+    duration_sec=('event_time', lambda x: (pd.to_datetime(x).max() - pd.to_datetime(x).min()).total_seconds()),
+    event_count=('event_name', 'count'),
+    reached_form=('event_name', lambda x: int('form_start' in x.values))
+).reset_index()
+
+print('세션 단위 데이터 shape:', sess.shape)
+print(sess.head())
+
+app_merged = app.merge(info[['notice_id', 'registration_open']], on='notice_id')
+app_merged['registration_open'] = pd.to_datetime(app_merged['registration_open'])
+app_merged['applied_at'] = pd.to_datetime(app_merged['applied_at'])
+app_merged['days_to_apply'] = (app_merged['applied_at'] - app_merged['registration_open']).dt.total_seconds() / 86400
+
+print('\n신청 소요일수(days_to_apply) 상위 5건:')
+print(app_merged[['notice_id', 'applied_at', 'days_to_apply']].head())
+
+#기술통계(평균, 표준편차, 중앙값, 최빈값, 산포도)
+def describe_full(series, name):
+    print(f'\n--- {name} 기술통계 ---')
+    print(f'평균     : {series.mean():.2f}')
+    print(f'중앙값   : {series.median():.2f}')
+    print(f'최빈값   : {series.mode().iloc[0]:.2f}')
+    print(f'표준편차 : {series.std():.2f}')
+    print(f'분산     : {series.var():.2f}')
+    print(f'최소~최대: {series.min():.2f} ~ {series.max():.2f}')
+    print(f'IQR      : {series.quantile(0.75) - series.quantile(0.25):.2f}')
+
+describe_full(sess['duration_sec'], '세션 체류시간(초)')
+describe_full(sess['event_count'], '세션 내 이벤트 수')
+describe_full(app_merged['days_to_apply'], '신청 소요일수')
+
+#변동계수(CV), 왜도, 첨도
+def dist_shape(series, name):
+    cv = series.std() / series.mean() * 100  # 변동계수(%)
+    skew = series.skew()
+    kurt = series.kurt()
+    print(f'\n--- {name} 분포 형태 ---')
+    print(f'변동계수(CV) : {cv:.2f}%  (값이 클수록 상대적 산포가 큼)')
+    print(f'왜도(Skewness): {skew:.2f}  ({"오른쪽 꼬리(양의 왜도)" if skew>0 else "왼쪽 꼬리(음의 왜도)" if skew<0 else "대칭"})')
+    print(f'첨도(Kurtosis): {kurt:.2f}  ({"정규분포보다 뾰족/이상치 많음" if kurt>0 else "정규분포보다 평평함"})')
+
+dist_shape(sess['duration_sec'], '세션 체류시간(초)')
+dist_shape(sess['event_count'], '세션 내 이벤트 수')
+dist_shape(app_merged['days_to_apply'], '신청 소요일수')
+
+#시각화-박스플롯
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+sess.boxplot(column='duration_sec', by='device', ax=axes[0])
+axes[0].set_title('디바이스별 세션 체류시간')
+axes[0].set_ylabel('체류시간(초)')
+axes[0].set_ylim(0, sess['duration_sec'].quantile(0.95))  # 극단 이상치 제외하고 보기
+
+app_merged.boxplot(column='days_to_apply', by='membership_type', ax=axes[1])
+axes[1].set_title('회원유형별 신청 소요일수')
+axes[1].set_ylabel('경과일')
+plt.xticks(rotation=20)
+
+plt.suptitle('')
+plt.tight_layout()
+plt.show()
+
+#시각화-막대그래프
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+sess['medium'].value_counts().plot(kind='bar', ax=axes[0], color='cornflowerblue')
+axes[0].set_title('유입매체(medium)별 세션 수')
+axes[0].set_ylabel('세션 수')
+axes[0].tick_params(axis='x', rotation=30)
+
+form_rate = sess.groupby('device')['reached_form'].mean() * 100
+form_rate.plot(kind='bar', ax=axes[1], color='darkorange')
+axes[1].set_title('디바이스별 폼 시작 도달률(%)')
+axes[1].set_ylabel('도달률(%)')
+axes[1].tick_params(axis='x', rotation=0)
+
+plt.tight_layout()
+plt.show()
+
+print('\n디바이스별 폼 도달률:')
+print(form_rate.round(1))
+
+#시각화-산점도
+plt.figure(figsize=(7, 5))
+colors = sess['reached_form'].map({0: 'lightgray', 1: 'crimson'})
+plt.scatter(sess['event_count'], sess['duration_sec'], c=colors, alpha=0.6, s=30)
+plt.xlabel('세션 내 이벤트 수')
+plt.ylabel('체류시간(초)')
+plt.title('이벤트 수 vs 체류시간 (빨강=폼시작 도달)')
+plt.ylim(0, sess['duration_sec'].quantile(0.95))
+plt.show()
+
+
+#한글폰트 설치
+!apt-get -qq install fonts-nanum > /dev/null
+
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
+# 폰트 파일 경로 직접 지정 및 등록
+font_path = '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
+fm.fontManager.addfont(font_path)
+
+font_name = fm.FontProperties(fname=font_path).get_name()
+plt.rc('font', family=font_name)
+plt.rcParams['axes.unicode_minus'] = False  # 마이너스 기호 깨짐 방지
+
+print('적용된 폰트 이름:', font_name)
+
+plt.figure(figsize=(3,1))
+plt.text(0.1, 0.5, '한글폰트 테스트 - 정상 출력 확인', fontsize=13)
+plt.axis('off')
+plt.show()
