@@ -1,0 +1,132 @@
+import numpy as np
+import pandas as pd
+import warnings
+warnings.filterwarnings('ignore')
+
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 150)
+
+# 코랩에서 로컬 파일 업로드
+from google.colab import files
+uploaded = files.upload()  # event_info, event_application, event_behavior 3개 CSV 모두 선택
+
+# 데이터 불러오기
+info = pd.read_csv('12기 수료 보고서 데이터셋 - event_info.csv')
+app = pd.read_csv('12기 수료 보고서 데이터셋 - event_application.csv')
+beh=pd.read_csv('12기 수료 보고서 데이터셋 - event_behavior.csv')
+
+print('event_info shape            :', info.shape)
+print('event_application shape     :', app.shape)
+print('event_behavior shape        :', beh.shape)
+
+print('\n=== event_info ===')
+print(info.head())
+
+print('\n=== event_application ===')
+print(app.head())
+
+print('\n=== event_behavior ===')
+print(beh.head())
+
+info['registration_open'] = pd.to_datetime(info['registration_open'])
+info['registration_close'] = pd.to_datetime(info['registration_close'])
+app['applied_at'] = pd.to_datetime(app['applied_at'])
+beh['event_time'] = pd.to_datetime(beh['event_time'])
+
+# 날짜형 변환
+print('날짜형 변환 완료')
+print(app.dtypes[['applied_at']])
+print(beh.dtypes[['event_time']])
+
+# 결측치 확인
+def missing_report(df, name) :
+  m = df.isnull().sum()
+  pct = (m/len(df)*100).round(2)
+  rep = pd.DataFrame({'결측치수': m, '결측치비율(%)' : pct})
+  rep = rep[rep['결측치수']>0]
+  print(f'\n--- {name} 결측치 현황 ---')
+  if len(rep) == 0:
+    print('결측치 없음')
+  else:
+      print(rep)
+
+missing_report(info, 'event_info')
+missing_report(app,  'event_application')
+missing_report(beh,  'event_behavior')
+
+print('\nmasked_user_id 결측 건의 event_name 분포:')
+print(beh[beh['masked_user_id'].isnull()]['event_name'].value_counts())
+
+print('\npage_referrer 결측 건의 source 분포:')
+print(beh[beh['page_referrer'].isnull()]['source'].value_counts())
+
+# 결측치 처리
+beh['page_referrer'] = beh['page_referrer'].fillna('direct_entry')
+
+beh['is_anonymous'] = beh['masked_user_id'].isnull().astype(int)
+
+print('결측치 처리 후 남은 결측치:')
+print(beh.isnull().sum()[beh.isnull().sum() > 0])
+
+# 빈도분석
+def freq_table(series, name):
+  cnt = series.value_counts()
+  pct = (series.value_counts(normalize=True)*100).round(2)
+  tbl = pd.DataFrame({'빈도':cnt, '비율(%)':pct})
+  print(f'\n--- {name} 빈도분석 ---')
+  print(tbl)
+
+print('####### event_info #######')
+freq_table(info['event_category'], 'event_category (행사유형)')
+freq_table(info['event_format'],   'event_format(진행방식)')
+
+print('\n####### event_application #######')
+freq_table(app['notice_id'],           'notice_id (행사)')
+freq_table(app['membership_type'],     'membership_type (회원유형)')
+freq_table(app['application_status'],  'application_status (신청상태)')
+
+print('\n####### event_behavior #######')
+freq_table(beh['event_name'],        'event_name (행동유형)')
+freq_table(beh['device_category'],   'device_category (디바이스)')
+freq_table(beh['source'],            'source (유입소스)')
+freq_table(beh['medium'],            'medium (유입매체)')
+
+# 레이블 인코딩(이진/순서형 변수)
+app['status_label']=app['application_status'].map({'approved': 1, 'cancelled': 0})
+
+info['event_category_label'] = info['event_category'].map({'oneday': 0, 'job': 1})
+info['event_format_label'] = info['event_format'].map({'online': 0, 'offline': 1})
+
+print('=== application_status 레이블 인코딩 ===')
+print(app[['application_status', 'status_label']].drop_duplicates())
+
+print('\n=== event_info 레이블 인코딩 ===')
+print(info[['event_category', 'event_category_label', 'event_format', 'event_format_label']])
+
+# 더미 변수 생성(다범주 명목형 변수)
+app['membership_type'] = pd.Categorical(
+    app['membership_type'],
+    categories=['비학회원', '정규학회원', '일반학회원', 'MOU동아리']
+)
+membership_dummies = pd.get_dummies(app['membership_type'], prefix='member', drop_first=True)
+app_encoded = pd.concat([app, membership_dummies], axis=1)
+
+print('=== membership_type 더미변수 결과 (기준범주=비학회원) ===')
+print(app_encoded[['membership_type'] + list(membership_dummies.columns)].drop_duplicates().sort_values('membership_type'))
+
+device_dummies = pd.get_dummies(beh['device_category'], prefix='device', drop_first=True)
+medium_dummies = pd.get_dummies(beh['medium'], prefix='medium', drop_first=True)
+beh_encoded = pd.concat([beh, device_dummies, medium_dummies], axis=1)
+
+print('\n=== 최종 컬럼 확인 ===')
+print('event_application:', app_encoded.columns.tolist())
+print('event_behavior   :', beh_encoded.columns.tolist())
+
+# 전처리 완료 파일
+info.to_csv('info_clean.csv', index=False)
+app_encoded.to_csv('app_encoded.csv', index=False)
+beh_encoded.to_csv('beh_encoded.csv', index=False)
+
+files.download('app_encoded.csv')
+files.download('beh_encoded.csv')
+files.download('info_clean.csv')
