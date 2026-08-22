@@ -1,0 +1,78 @@
+#정규성 검정
+
+from scipy import stats
+
+# Shapiro-Wilk 정규성 검정 (표본이 크면 500개까지만 샘플링해서 검정)
+mobile_dur = sess[sess['device']=='mobile']['duration_sec']
+desktop_dur = sess[sess['device']=='desktop']['duration_sec']
+
+sw_mobile = stats.shapiro(mobile_dur.sample(min(len(mobile_dur),500), random_state=1))
+sw_desktop = stats.shapiro(desktop_dur.sample(min(len(desktop_dur),500), random_state=1))
+
+print('모바일 체류시간 정규성 검정 : statistic=%.3f, p=%.2e' % sw_mobile)
+print('데스크톱 체류시간 정규성 검정: statistic=%.3f, p=%.2e' % sw_desktop)
+print('\n판단: p < 0.05 이므로 두 그룹 모두 정규분포를 따르지 않음 (H0 기각)')
+print('-> 왜도가 심한 데이터이므로 t-검정 대신 비모수검정(Mann-Whitney U)을 사용합니다')
+
+#디바이스간 체류시간 차이(양측검정)
+
+# H0 : 모바일과 데스크톱의 체류시간 분포에 차이가 없다
+# H1 : 모바일과 데스크톱의 체류시간 분포에 차이가 있다.
+
+u_stat, p_value = stats.mannwhitneyu(mobile_dur, desktop_dur, alternative='two-sided')
+
+print(f'모바일 평균/중앙값 체류시간 : {mobile_dur.mean():.1f}초 / {mobile_dur.median():.1f}초')
+print(f'데스크톱 평균/중앙값 체류시간: {desktop_dur.mean():.1f}초 / {desktop_dur.median():.1f}초')
+print(f'\nMann-Whitney U 통계량: {u_stat:.1f}')
+print(f'p-value (양측검정)   : {p_value:.4f}')
+
+alpha = 0.05
+if p_value < alpha:
+    print(f'\n결론: p({p_value:.4f}) < 0.05 이므로 H0 기각 -> 디바이스 간 체류시간 차이는 통계적으로 유의함')
+else:
+    print(f'\n결론: p({p_value:.4f}) >= 0.05 이므로 H0 기각 실패 -> 디바이스 간 체류시간 차이는 통계적으로 유의하지 않음')
+
+#디바이스 간 폼 도달률 차이(카이제곱 + 비율 z검정)
+
+from statsmodels.stats.proportion import proportions_ztest
+
+# 카이제곱 독립성 검정: 디바이스와 폼도달여부가 독립인지 검정
+ct = pd.crosstab(sess['device'], sess['reached_form'])
+print('디바이스별 폼 도달 교차표:')
+print(ct)
+
+chi2, p_chi, dof, expected = stats.chi2_contingency(ct.loc[['mobile','desktop']])
+print(f'\n카이제곱 통계량: {chi2:.2f}, p-value: {p_chi:.2e}')
+
+# 비율 z검정 - 단측검정: "모바일 도달률이 데스크톱보다 높다"는 방향성 가설 검증
+rate_mobile  = sess[sess['device']=='mobile']['reached_form'].mean()
+rate_desktop = sess[sess['device']=='desktop']['reached_form'].mean()
+print(f'\n모바일 폼 도달률 : {rate_mobile*100:.1f}%')
+print(f'데스크톱 폼 도달률: {rate_desktop*100:.1f}%')
+
+succ = [sess[sess['device']=='mobile']['reached_form'].sum(), sess[sess['device']=='desktop']['reached_form'].sum()]
+nobs = [len(mobile_dur), len(desktop_dur)]
+
+# H0: 모바일 도달률 <= 데스크톱 도달률
+# H1: 모바일 도달률 > 데스크톱 도달률 (단측검정, alternative='larger')
+z_stat, p_one = proportions_ztest(succ, nobs, alternative='larger')
+print(f'\n비율 z검정 (단측, 모바일>데스크톱 방향) : z={z_stat:.2f}, p={p_one:.2e}')
+
+if p_one < 0.05:
+    print('결론: 모바일 사용자의 폼 도달률이 데스크톱보다 통계적으로 유의하게 높습니다.')
+
+#회원유형 간 신청 소요일수 차이
+
+# H0: 4개 회원유형 간 신청 소요일수(days_to_apply) 분포에 차이가 없다
+# H1: 적어도 한 그룹은 다르다
+
+groups = [g['days_to_apply'].values for _, g in app_merged.groupby('membership_type')]
+h_stat, p_kw = stats.kruskal(*groups)
+
+print(app_merged.groupby('membership_type')['days_to_apply'].agg(['mean','median','count']).round(2))
+print(f'\nKruskal-Wallis H 통계량: {h_stat:.2f}, p-value: {p_kw:.4f}')
+
+if p_kw < 0.05:
+    print('결론: 회원유형별 신청 소요일수에 유의한 차이가 있음')
+else:
+    print('결론: 회원유형별 신청 소요일수 차이는 통계적으로 유의하지 않음 (우연한 차이일 가능성)')
