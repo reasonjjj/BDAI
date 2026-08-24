@@ -24,3 +24,9 @@
 5. 예측 모델링
 
 
+
+<img width="1505" height="485" alt="Image" src="https://github.com/user-attachments/assets/ecd431ff-b726-42c6-84b1-07ac5b541da6" />
+
+<img width="1557" height="940" alt="Image" src="https://github.com/user-attachments/assets/feccaed6-5c6d-4716-965d-6557d9d9f0ec" />
+
+<img width="1547" height="471" alt="Image" src="https://github.com/user-attachments/assets/97834508-7392-4843-baf2-3f0c4ee651d4" />
