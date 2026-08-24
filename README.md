@@ -25,6 +25,8 @@
 
 
 
+[신청전환율_대시보드]
+
 <img width="1505" height="485" alt="Image" src="https://github.com/user-attachments/assets/ecd431ff-b726-42c6-84b1-07ac5b541da6" />
 
 <img width="1557" height="940" alt="Image" src="https://github.com/user-attachments/assets/feccaed6-5c6d-4716-965d-6557d9d9f0ec" />
