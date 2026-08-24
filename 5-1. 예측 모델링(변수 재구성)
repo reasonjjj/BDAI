@@ -1,0 +1,80 @@
+#특정변수 재구성 (device, medium_grp만으로 다시 학습)
+from sklearn.model_selection import train_test_split
+
+# event_count, duration_sec 제외: 신청 과정 자체와 겹치는 변수를 빼고
+# 사용자가 유입되는 순간 이미 알 수 있는 정보(디바이스, 유입채널)만 사용
+X = pd.get_dummies(user_beh[['device', 'medium_grp']], drop_first=True)
+y = user_beh['applied']
+
+print('사용 변수:', X.columns.tolist())
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.25, random_state=42, stratify=y
+)
+print('Train:', X_train.shape, 'Test:', X_test.shape)
+
+#의사결정나무 depth 탐색
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import roc_auc_score
+
+print('depth별 Train/Test AUC')
+for depth in [1, 2, 3, 4, None]:
+    dt = DecisionTreeClassifier(max_depth=depth, random_state=42)
+    dt.fit(X_train, y_train)
+    train_auc = roc_auc_score(y_train, dt.predict_proba(X_train)[:, 1])
+    test_auc  = roc_auc_score(y_test,  dt.predict_proba(X_test)[:, 1])
+    print(f'depth={str(depth):>4} : train_auc={train_auc:.3f}, test_auc={test_auc:.3f}, gap={train_auc-test_auc:.3f}')
+
+#모델비교 (트리/랜덤포레스트/로지스틱)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+
+dt = DecisionTreeClassifier(max_depth=2, random_state=42).fit(X_train, y_train)
+rf = RandomForestClassifier(n_estimators=300, max_depth=3, random_state=42).fit(X_train, y_train)
+lr = LogisticRegression(max_iter=1000).fit(X_train, y_train)
+
+results = pd.DataFrame({
+    '모델': ['DecisionTree(depth=2)', 'RandomForest', 'LogisticRegression'],
+    'Test AUC': [
+        roc_auc_score(y_test, dt.predict_proba(X_test)[:,1]),
+        roc_auc_score(y_test, rf.predict_proba(X_test)[:,1]),
+        roc_auc_score(y_test, lr.predict_proba(X_test)[:,1]),
+    ]
+})
+print(results.round(3))
+
+#K-Fold 교차검(CV AUC)
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+
+skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+for name, model in [('DecisionTree', dt), ('RandomForest', rf), ('LogisticRegression', lr)]:
+    cv_scores = cross_val_score(model, X, y, cv=skf, scoring='roc_auc')
+    print(f'{name:20s} CV AUC = {cv_scores.mean():.3f} (+/- {cv_scores.std():.3f})')
+
+#변수 중요도 + 실제 그룹별 전환
+importance = pd.Series(rf.feature_importances_, index=X.columns).sort_values(ascending=False)
+print('=== 변수 중요도 (RandomForest) ===')
+print(importance.round(3))
+
+print('\n=== 로지스틱 회귀 오즈비 ===')
+odds = pd.Series(np.exp(lr.coef_[0]), index=X.columns).round(3)
+print(odds)
+
+print('\n=== 디바이스별 실제 전환율 ===')
+print((user_beh.groupby('device')['applied'].mean() * 100).round(1))
+
+print('\n=== 유입채널별 실제 전환율 ===')
+
+#임계값별 정밀도, 재현율, 혼동행렬
+from sklearn.metrics import precision_score, recall_score, confusion_matrix
+
+probs = rf.predict_proba(X_test)[:, 1]
+print('임계값별 Precision/Recall')
+for th in [0.3, 0.4, 0.5, 0.6, 0.7]:
+    pred = (probs >= th).astype(int)
+    print(f'threshold={th} : precision={precision_score(y_test,pred):.3f}, recall={recall_score(y_test,pred):.3f}')
+
+pred_default = (probs >= 0.5).astype(int)
+print('\n혼동행렬 (threshold=0.5)')
+print(confusion_matrix(y_test, pred_default))
+print((user_beh.groupby('medium_grp')['applied'].mean() * 100).round(1))
