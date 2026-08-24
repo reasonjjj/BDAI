@@ -1,0 +1,61 @@
+import pandas as pd
+import numpy as np
+
+# 사용자별 x 공지별 행동 집계 (모든 세션 대상, 회원 여부와 무관하게 전체 방문자)
+user_beh = beh.groupby(['notice_id', 'masked_user_id']).agg(
+    duration_sec=('event_time', lambda x: (x.max() - x.min()).total_seconds()),
+    event_count=('event_name', 'count'),
+    device=('device_category', lambda x: x.mode().iloc[0]),
+    medium=('medium', lambda x: x.mode().iloc[0]),
+    reached_form=('event_name', lambda x: int('form_start' in x.values))
+).reset_index()
+
+# 신청 여부(전환) 라벨 부여: 이 사용자가 해당 공지에 실제로 신청서를 냈는가
+app_pairs = set(zip(app['notice_id'], app['masked_user_id']))
+user_beh['applied'] = user_beh.apply(
+    lambda r: int((r['notice_id'], r['masked_user_id']) in app_pairs), axis=1
+)
+
+print('분석 대상(사용자x공지) 수:', user_beh.shape[0])
+print(user_beh['applied'].value_counts())
+print(user_beh[['device','medium']].apply(pd.Series.value_counts))
+
+# medium 중 표본이 매우 적은 카테고리(landingpage n=1, referral n=10 등)는
+# 그대로 두면 로지스틱 회귀에서 계수가 발산(완전분리)하므로 social로 통합
+user_beh['medium_grp'] = user_beh['medium'].replace({'landingpage': 'social', 'referral': 'social'})
+
+user_beh['device'] = pd.Categorical(user_beh['device'], categories=['desktop', 'mobile', 'tablet'])
+user_beh['medium_grp'] = pd.Categorical(user_beh['medium_grp'], categories=['(none)', 'organic', 'social'])
+
+print(user_beh['medium_grp'].value_counts())
+
+#로지스틱회귀 - 신청 전환 여부 ~ 디바이스+유입채널
+import statsmodels.formula.api as smf
+
+# H0: 디바이스/유입채널은 신청 전환 여부에 영향이 없다
+model = smf.logit('applied ~ C(device) + C(medium_grp)', data=user_beh).fit()
+print(model.summary())
+
+print('\n=== 오즈비(Odds Ratio) 해석 ===')
+odds = np.exp(model.params).round(3)
+print(odds)
+print('\n* desktop, medium=(none) 이 기준(base) 범주입니다')
+
+#다중공선성 확인(VIF)
+import patsy
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+y, X = patsy.dmatrices('applied ~ C(device) + C(medium_grp)', data=user_beh, return_type='dataframe')
+vif = pd.DataFrame()
+vif['변수'] = X.columns
+vif['VIF'] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+print(vif)
+print('\n판단 기준: VIF > 5(또는 10)이면 다중공선성 의심. 모두 5 미만이면 문제 없음.')
+
+#모델 적합도(AIC/BIC/Pseudo R^2)
+print(f'Pseudo R-squared : {model.prsquared:.4f}')
+print(f'AIC              : {model.aic:.2f}')
+print(f'BIC              : {model.bic:.2f}')
+print(f'Log-Likelihood   : {model.llf:.2f}')
+print(f'LLR p-value      : {model.llr_pvalue:.2e}  (모델 전체가 유의미한지 검정, <0.05면 유의)')
+
